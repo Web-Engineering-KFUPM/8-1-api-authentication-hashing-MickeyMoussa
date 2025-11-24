@@ -251,26 +251,203 @@ app.get("/", (_req, res) => {
   res.send("Server is running");
 });
 
+/*
+WHAT IT MUST DO:
+ *   1) Read JSON body:
+ *        const { email, password } = req.body || {};
+ *   2) Validate required fields:
+ *        - If email OR password is missing:
+ *            return res.status(400).json({ error: "Email and password are required" });
+ *   3) Check if user already exists in the in-memory "users" array:
+ *        const existing = users.find((u) => u.email === email);
+ *        - If existing is found:
+ *            return res.status(400).json({ error: "User already exists" });
+ *   4) Hash the password using bcrypt:
+ *        const hash = await bcrypt.hash(password, 10);
+ *   5) Store the new user:
+ *        users.push({ email, passwordHash: hash });
+ *   6) Send success response:
+ *        return res.status(201).json({ message: "User registered!" });
+ *   7) Wrap everything in try/catch; on error:
+ *        console.error("Register error:", err);
+ *        return res.status(500).json({ error: "Server error during register" });
+ *
+ * HOW TO TEST /register:
+ *   - METHOD: POST
+ *   - URL:    http://localhost:3000/register
+ *   - BODY (raw + JSON):
+ *       {
+ *         "email": "student@example.com",
+ *         "password": "mypassword123"
+ *       }
+ *   - EXPECT:
+ *       • First time: 201, { "message": "User registered!" }
+ *       • Second time with same email: 400, { "error": "User already exists" }
+ *
+*/
+
 // =========================
 // POST /register
 // =========================
 app.post("/register", async (req, res) => {
-  // Implement logic here based on the TODO 1.
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+  const existing = users.find((u) => u.email === email);
+  if (existing) {
+    return res.status(400).json({ error: "User already exists" });
+  }
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    users.push({ email, passwordHash: hash });
+    return res.status(201).json({ message: "User registered!" });
+  } catch (err) {
+    console.error("Register error:", err);
+    return res.status(500).json({ error: "Server error during register" });
+  }
 });
 
 // =========================
 // POST /login
 // =========================
+
+/*
+WHAT IT MUST DO:
+ *   1) Read JSON body:
+ *        const { email, password } = req.body || {};
+ *   2) Validate:
+ *        - If missing email OR password:
+ *            return res.status(400).json({ error: "Email and password are required" });
+ *   3) Find user by email:
+ *        const user = users.find((u) => u.email === email);
+ *        - If NOT found:
+ *            return res.status(400).json({ error: "User not found" });
+ *   4) Compare passwords with bcrypt:
+ *        const match = await bcrypt.compare(password, user.passwordHash);
+ *        - If NOT matched:
+ *            return res.status(400).json({ error: "Wrong password" });
+ *   5) Create JWT token using secret "abc123":
+ *        const token = jwt.sign(
+ *          { email },
+ *          JWT_SECRET,          // this is "abc123"
+ *          { expiresIn: "1h" }
+ *        );
+ *   6) Return the token:
+ *        return res.json({ token });
+ *   7) On unexpected error, catch and respond:
+ *        console.error("Login error:", err);
+ *        return res.status(500).json({ error: "Server error during login" });
+ *
+ * HOW TO TEST /login:
+ *   - Make sure you have already registered the user.
+ *   - METHOD: POST
+ *   - URL:    http://localhost:3000/login
+ *   - BODY (raw + JSON):
+ *       {
+ *         "email": "student@example.com",
+ *         "password": "mypassword123"
+ *       }
+ *   - EXPECT:
+ *       • On success: 200, { "token": "<JWT_STRING>" }
+ *       • Wrong email:   400, { "error": "User not found" }
+ *       • Wrong password:400, { "error": "Wrong password" }
+ *
+*/
 app.post("/login", async (req, res) => {
-  // Implement logic here based on the TODO 2.
+  const {email, password} = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+  const user = users.find((u) => u.email === email);
+  if (!user) {
+    return res.status(400).json({ error: "User not found" });
+  }
+  try {
+    const match = await bcrypt.compare(password, user.passwordHash);
+    if (!match) {
+      return res.status(400).json({ error: "Wrong password" });
+    }
+    const token = jwt.sign(
+      { email },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+    return res.json({ token });
+  } catch (err) {
+    console.error("Login error:", err);
+    return res.status(500).json({ error: "Server error during login" });
+  }
 });
 
 // =========================
 // Protected Weather API
 // GET /weather?city=Riyadh
 // =========================
+/*
+AUTHENTICATION REQUIREMENT (EXTREMELY IMPORTANT):
+ *   This route is PROTECTED by JWT.
+ *
+ *   The client MUST send a valid token in the `Authorization` header.
+ *
+ *   ▶ HOW TO ADD AUTHORIZATION IN POSTMAN / THUNDER CLIENT:
+ *
+ *   1) First, obtain a token by calling the /login endpoint.
+ *      Example response:
+ *        {
+ *          "token": "eyJhbGciOiJIUzI1..."
+ *        }
+ *
+ *   2) Copy the token (the entire long string).
+ *
+ *   3) Open POSTMAN → go to the **Headers** tab.
+ *
+ *   4) Add a new header:
+ *
+ *         KEY:     Authorization
+ *         VALUE:   Bearer <paste_your_token_here>
+ *
+ *      ✔ Example (VALUE field):
+ *         Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....
+ *
+ *      ⚠ DO NOT put quotes around the token.
+ *      ⚠ DO NOT remove the word "Bearer".
+ *      ⚠ There MUST be ONE SPACE between "Bearer" and the token.
+*/
 app.get("/weather", async (req, res) => {
-  // Implement logic here based on the TODO 3.
+  const auth = req.headers.authorization;
+  if (!auth) {
+    return res.status(401).json({ error: "Missing token" });
+  }
+  const token = auth.split(" ")[1];
+  try {
+    jwt.verify(token, JWT_SECRET);
+  } catch {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+  const city = req.query.city;
+  if (!city) {
+    return res.status(400).json({ error: "City required" });
+  }
+  const url = `https://goweather.herokuapp.com/weather/${encodeURIComponent(city)}`;
+  try {
+    const weatherResponse = await fetch(url); 
+    if (!weatherResponse.ok) {
+      return res.status(500).json({ error: "Error from weather API" });
+    }
+    const data = await weatherResponse.json();
+    return res.json({
+      city,
+      temp: data.temperature,
+      description: data.description,
+      wind: data.wind,
+      raw: data
+    });
+  } catch (err) {
+    console.error("Weather fetch error:", err);
+    return res.status(500).json({ error: "Server error during weather fetch" });
+  }
+  
 });
 
 // Start server
